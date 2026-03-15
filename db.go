@@ -29,6 +29,7 @@ func CreateDatabase() (*Database, error) {
 		return nil, fmt.Errorf("Database key is not provided")
 	}
 	db := Database{Data: make(map[string]Value), Key: k}
+	go db.cleanup(1 * time.Minute)
 	return &db, nil
 }
 
@@ -43,7 +44,7 @@ func (db *Database) Set(key string, val []byte) {
 }
 
 func (db *Database) Get(key string) []byte {
-	db.mut.RLock()
+	db.mut.Lock()
 	defer db.mut.Unlock()
 	val, ok := db.Data[key]
 	if !ok || time.Now().After(val.ExpiresAt) {
@@ -52,6 +53,35 @@ func (db *Database) Get(key string) []byte {
 	}
 	val.ExpiresAt = time.Now().Add(DEFAULT_TTL)
 	return val.Data
+}
+
+func (db *Database) Print() []byte {
+	db.mut.RLock()
+	defer db.mut.RUnlock()
+	var result []byte
+	for k, v := range db.Data {
+		line := fmt.Sprintf("%s: %s\n", k, string(v.Data))
+		result = append(result, []byte(line)...)
+	}
+	if len(result) == 0 {
+		return []byte("(empty)\n")
+	}
+	return result
+}
+
+func (db *Database) cleanup(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		db.mut.Lock()
+		now := time.Now()
+		for k, v := range db.Data {
+			if now.After(v.ExpiresAt) {
+				delete(db.Data, k)
+			}
+		}
+		db.mut.Unlock()
+	}
 }
 
 func (db *Database) Delete(key string) bool {
