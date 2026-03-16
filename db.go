@@ -15,7 +15,7 @@ type Value struct {
 }
 
 type Database struct {
-	Data map[string]Value
+	Data map[string]*Value
 	mut  sync.RWMutex
 	Key  string
 }
@@ -28,8 +28,8 @@ func CreateDatabase() (*Database, error) {
 	if len(k) == 0 {
 		return nil, fmt.Errorf("Database key is not provided")
 	}
-	db := Database{Data: make(map[string]Value), Key: k}
-	go db.cleanup(1 * time.Minute)
+	db := Database{Data: make(map[string]*Value), Key: k}
+	
 	return &db, nil
 }
 
@@ -40,7 +40,7 @@ func (db *Database) Authenticate(password string) bool {
 func (db *Database) Set(key string, val []byte) {
 	db.mut.Lock()
 	defer db.mut.Unlock()
-	db.Data[key] = Value{val, time.Now().Add(DEFAULT_TTL)}
+	db.Data[key] = &Value{val, time.Now().Add(DEFAULT_TTL)}
 }
 
 func (db *Database) Get(key string) []byte {
@@ -67,21 +67,6 @@ func (db *Database) Print() []byte {
 		return []byte("(empty)\n")
 	}
 	return result
-}
-
-func (db *Database) cleanup(interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for range ticker.C {
-		db.mut.Lock()
-		now := time.Now()
-		for k, v := range db.Data {
-			if now.After(v.ExpiresAt) {
-				delete(db.Data, k)
-			}
-		}
-		db.mut.Unlock()
-	}
 }
 
 func (db *Database) Delete(key string) bool {

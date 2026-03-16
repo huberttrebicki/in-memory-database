@@ -2,9 +2,12 @@ package main
 
 import (
 	"bufio"
+	"encoding/base64"
+	"fmt"
 	"log"
 	"net"
 	"strings"
+	"time"
 )
 
 func main() {
@@ -18,17 +21,25 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error occured while creating a database instance %v", err)
 	}
+	logger, err := CreateLogger("database.log")
+	if err != nil {
+		log.Fatalf("Error occured while creating a logger instance %v", err)
+	}
+	err = logger.Restore(db)
+	if err != nil {
+		log.Fatalf("Error occured while restoring database state %v", err)
+	}
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			continue
 		}
 
-		go handleConnection(conn, db)
+		go handleConnection(conn, db, logger)
 	}
 }
 
-func handleConnection(conn net.Conn, db *Database) {
+func handleConnection(conn net.Conn, db *Database, logger *Logger) {
 	defer conn.Close()
 	scannner := bufio.NewScanner(conn)
 
@@ -59,9 +70,25 @@ func handleConnection(conn net.Conn, db *Database) {
 				conn.Write(append(val, '\n'))
 			}
 		case "SET":
+			if len(parts) != 3 {
+				conn.Write([]byte("INVALID NUMBER OF ARGUMENTS\n"))
+			}
 			db.Set(parts[1], []byte(parts[2]))
+			line := fmt.Sprintf("%d SET %s %s", time.Now().UnixNano(), parts[1], base64.StdEncoding.EncodeToString([]byte(parts[2])))
+			logger.Append(line)
 		case "DELETE":
-			db.Delete(parts[1])
+			if len(parts) != 2 {
+				conn.Write([]byte("INVALID NUMBER OF ARGUMENTS\n"))
+				continue
+			}
+			ok := db.Delete(parts[1])
+			if !ok {
+				conn.Write([]byte("NOT FOUND\n"))
+			} else {
+				conn.Write(fmt.Appendf(nil, "DELETED KEY: %v\n", parts[1]))
+				line := fmt.Sprintf("%d DELETE %s", time.Now().UnixNano(), parts[1])
+				logger.Append(line)
+			}
 		case "PRINT":
 			conn.Write(db.Print())
 		}
