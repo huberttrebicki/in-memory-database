@@ -21,25 +21,26 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error occured while creating a database instance %v", err)
 	}
-	logger, err := CreateLogger("database.log")
+	persist, err := CreatePersistence()
 	if err != nil {
-		log.Fatalf("Error occured while creating a logger instance %v", err)
+		log.Fatalf("Error occured while creating persistence instance %v", err)
 	}
-	err = logger.Restore(db)
+	err = persist.Restore(db)
 	if err != nil {
 		log.Fatalf("Error occured while restoring database state %v", err)
 	}
+	go persist.CreateSnapshot(time.NewTicker(5*time.Minute), db)
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			continue
 		}
 
-		go handleConnection(conn, db, logger)
+		go handleConnection(conn, db, persist)
 	}
 }
 
-func handleConnection(conn net.Conn, db *Database, logger *Logger) {
+func handleConnection(conn net.Conn, db *Database, persist *Persistence) {
 	defer conn.Close()
 	scannner := bufio.NewScanner(conn)
 
@@ -75,7 +76,7 @@ func handleConnection(conn net.Conn, db *Database, logger *Logger) {
 			}
 			db.Set(parts[1], []byte(parts[2]))
 			line := fmt.Sprintf("%d SET %s %s", time.Now().UnixNano(), parts[1], base64.StdEncoding.EncodeToString([]byte(parts[2])))
-			logger.Append(line)
+			persist.Append(line)
 		case "DELETE":
 			if len(parts) != 2 {
 				conn.Write([]byte("INVALID NUMBER OF ARGUMENTS\n"))
@@ -87,7 +88,7 @@ func handleConnection(conn net.Conn, db *Database, logger *Logger) {
 			} else {
 				conn.Write(fmt.Appendf(nil, "DELETED KEY: %v\n", parts[1]))
 				line := fmt.Sprintf("%d DELETE %s", time.Now().UnixNano(), parts[1])
-				logger.Append(line)
+				persist.Append(line)
 			}
 		case "PRINT":
 			conn.Write(db.Print())
